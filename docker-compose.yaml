@@ -1,0 +1,85 @@
+version: "3"
+
+services:
+  portainer:
+    image: portainer/portainer
+    container_name: "${PROJECT_NAME}_portainer"
+    command: --no-auth -H unix:///var/run/docker.sock
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    labels:
+      - "traefik.http.routers.${PROJECT_NAME}_portainer.rule=Host(`portainer.${PROJECT_BASE_URL}`)"
+
+  apache:
+    image: wodby/apache:$APACHE_TAG
+    container_name: "${PROJECT_NAME}_apache"
+    depends_on:
+      - php
+    environment:
+      APACHE_LOG_LEVEL: debug
+      APACHE_BACKEND_HOST: php
+      APACHE_VHOST_PRESET: php
+    volumes:
+      - ./:/var/www/html
+    # For macOS users (https://wodby.com/docs/stacks/wordpress/local#docker-for-mac)
+      # - ./:/var/www/html:cached # User-guided caching
+      # - docker-sync:/var/www/html # Docker-sync
+    labels:
+      - "traefik.http.routers.${PROJECT_NAME}_apache.rule=Host(`${PROJECT_BASE_URL}`)"
+
+  php:
+    image: wodby/wordpress-php:$PHP_TAG
+    container_name: "${PROJECT_NAME}_php"
+    environment:
+      PHP_SENDMAIL_PATH: /usr/sbin/sendmail -t -i -S mailhog:1025
+      DB_HOST: $DATABASE_HOST
+      DB_USER: $DATABASE_USER
+      DB_PASSWORD: $DATABASE_PASSWORD
+      DB_NAME: $DATABASE_NAME
+      PHP_FPM_USER: wodby
+      PHP_FPM_GROUP: wodby
+## Read instructions at https://wodby.com/docs/stacks/wordpress/local#xdebug
+#      PHP_XDEBUG: 1
+#      PHP_XDEBUG_DEFAULT_ENABLE: 1
+#      PHP_XDEBUG_REMOTE_CONNECT_BACK: 0
+#      PHP_IDE_CONFIG: serverName=my-ide
+#      PHP_XDEBUG_IDEKEY: "my-ide"
+#      PHP_XDEBUG_REMOTE_HOST: 172.17.0.1 # Linux
+#      PHP_XDEBUG_REMOTE_HOST: 10.254.254.254 # macOS
+#      PHP_XDEBUG_REMOTE_HOST: 10.0.75.1 # Windows
+    volumes:
+      - ./:/var/www/html
+## For macOS users (https://wodby.com/docs/stacks/wordpress/local#docker-for-mac)
+#      - ./:/var/www/html:cached # User-guided caching
+#      - docker-sync:/var/www/html # Docker-sync
+## For XHProf and Xdebug profiler traces
+#      - files:/mnt/files
+
+  mailhog:
+    image: mailhog/mailhog
+    container_name: "${PROJECT_NAME}_mailhog"
+    labels:
+    - "traefik.http.services.${PROJECT_NAME}_mailhog.loadbalancer.server.port=8025"
+    - "traefik.http.routers.${PROJECT_NAME}_mailhog.rule=Host(`mailhog.${PROJECT_BASE_URL}`)"
+
+  pma:
+    image: phpmyadmin/phpmyadmin
+    container_name: "${PROJECT_NAME}_pma"
+    environment:
+      PMA_HOST: $DATABASE_HOST
+      PMA_USER: $DATABASE_USER
+      PMA_PASSWORD: $DATABASE_PASSWORD
+      PHP_UPLOAD_MAX_FILESIZE: 1G
+      PHP_MAX_INPUT_VARS: 1G
+    labels:
+      - "traefik.http.routers.${PROJECT_NAME}_pma.rule=Host(`pma.${PROJECT_BASE_URL}`)"
+
+  mariadb:
+    image: wodby/mariadb:$MARIADB_TAG
+    container_name: "${PROJECT_NAME}_mariadb"
+    stop_grace_period: 30s
+    environment:
+      MYSQL_ROOT_PASSWORD: $DATABASE_ROOT_PASSWORD
+      MYSQL_DATABASE: $DATABASE_NAME
+      MYSQL_USER: $DATABASE_USER
+      MYSQL_PASSWORD: $DATABASE_PASSWORD
