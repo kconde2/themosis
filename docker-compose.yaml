@@ -1,9 +1,31 @@
 version: "3"
 
 services:
+  traefik:
+    image: "traefik:v2.0.2"
+    container_name: "${PROJECT_NAME}_traefik"
+    command:
+      - "--log.level=DEBUG"
+      - "--api.insecure=true"
+      # Enabling docker provider
+      - "--providers.docker=true"
+      # Do not expose containers unless explicitly told so
+      - "--providers.docker.exposedbydefault=true"
+      - "--entrypoints.web.address=:80"
+    ports:
+      - "80:80"
+      - "8080:8080"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.traefik.entrypoints=web"
+      - "traefik.http.routers.traefik.rule=Host(`monitor.localhost`)"
+      - "traefik.http.services.traefik.loadbalancer.server.port=8080"
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+
   portainer:
     image: portainer/portainer
-    container_name: "${PROJECT_NAME}_portainer"
+    container_name: "${PROJECT_NAME}_portainer-s"
     command: --no-auth -H unix:///var/run/docker.sock
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
@@ -11,57 +33,19 @@ services:
       - "traefik.http.routers.${PROJECT_NAME}_portainer.rule=Host(`portainer.${PROJECT_BASE_URL}`)"
 
   apache:
-    image: wodby/apache:$APACHE_TAG
-    container_name: "${PROJECT_NAME}_apache"
-    depends_on:
-      - php
-    environment:
-      APACHE_LOG_LEVEL: debug
-      APACHE_BACKEND_HOST: php
-      APACHE_VHOST_PRESET: php
-    volumes:
-      - ./:/var/www/html
-    # For macOS users (https://wodby.com/docs/stacks/wordpress/local#docker-for-mac)
-      # - ./:/var/www/html:cached # User-guided caching
-      # - docker-sync:/var/www/html # Docker-sync
-    labels:
-      - "traefik.http.routers.${PROJECT_NAME}_apache.rule=Host(`${PROJECT_BASE_URL}`)"
-
-  php:
-    image: wodby/wordpress-php:$PHP_TAG
-    container_name: "${PROJECT_NAME}_php"
-    environment:
-      PHP_SENDMAIL_PATH: /usr/sbin/sendmail -t -i -S mailhog:1025
-      DB_HOST: $DATABASE_HOST
-      DB_USER: $DATABASE_USER
-      DB_PASSWORD: $DATABASE_PASSWORD
-      DB_NAME: $DATABASE_NAME
-      PHP_FPM_USER: wodby
-      PHP_FPM_GROUP: wodby
-## Read instructions at https://wodby.com/docs/stacks/wordpress/local#xdebug
-#      PHP_XDEBUG: 1
-#      PHP_XDEBUG_DEFAULT_ENABLE: 1
-#      PHP_XDEBUG_REMOTE_CONNECT_BACK: 0
-#      PHP_IDE_CONFIG: serverName=my-ide
-#      PHP_XDEBUG_IDEKEY: "my-ide"
-#      PHP_XDEBUG_REMOTE_HOST: 172.17.0.1 # Linux
-#      PHP_XDEBUG_REMOTE_HOST: 10.254.254.254 # macOS
-#      PHP_XDEBUG_REMOTE_HOST: 10.0.75.1 # Windows
-    volumes:
-      - ./:/var/www/html
-## For macOS users (https://wodby.com/docs/stacks/wordpress/local#docker-for-mac)
-#      - ./:/var/www/html:cached # User-guided caching
-#      - docker-sync:/var/www/html # Docker-sync
-## For XHProf and Xdebug profiler traces
-#      - files:/mnt/files
-
-  mailhog:
-    image: mailhog/mailhog
-    container_name: "${PROJECT_NAME}_mailhog"
-    labels:
-    - "traefik.http.services.${PROJECT_NAME}_mailhog.loadbalancer.server.port=8025"
-    - "traefik.http.routers.${PROJECT_NAME}_mailhog.rule=Host(`mailhog.${PROJECT_BASE_URL}`)"
-
+      build: ./docker/apache
+      container_name: "${PROJECT_NAME}_portainer"
+      depends_on:
+          - mysql
+      volumes:
+          - ./docker/apache/apache2.conf:/etc/apache2/conf-enabled/apache2.conf:ro
+          - ./docker/apache/php.ini:/usr/local/etc/php/php.ini
+          - ./:/var/www/html:cached
+      expose:
+          - 80
+      labels:
+          - "traefik.enable=true"
+          - "traefik.http.routers.apache.rule=Host(`localhost`)"
   pma:
     image: phpmyadmin/phpmyadmin
     container_name: "${PROJECT_NAME}_pma"
@@ -74,12 +58,13 @@ services:
     labels:
       - "traefik.http.routers.${PROJECT_NAME}_pma.rule=Host(`pma.${PROJECT_BASE_URL}`)"
 
-  mariadb:
-    image: wodby/mariadb:$MARIADB_TAG
-    container_name: "${PROJECT_NAME}_mariadb"
-    stop_grace_period: 30s
+  mysql:
+    image: mysql:${MYSQL_TAG}
+    container_name: "${PROJECT_NAME}_mysql"
     environment:
       MYSQL_ROOT_PASSWORD: $DATABASE_ROOT_PASSWORD
       MYSQL_DATABASE: $DATABASE_NAME
       MYSQL_USER: $DATABASE_USER
       MYSQL_PASSWORD: $DATABASE_PASSWORD
+    volumes:
+        - ./docker/mysql/data:/var/lib/mysql
